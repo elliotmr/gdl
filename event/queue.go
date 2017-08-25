@@ -8,6 +8,12 @@ import (
 
 const MaxQueued = 65535
 
+const (
+	Add = iota
+	Peek
+	Get
+)
+
 type Filter func(userdata interface{}, event Event) bool
 
 type Watcher struct {
@@ -16,9 +22,9 @@ type Watcher struct {
 }
 
 type Entry struct {
-	event Data
-	prev  *Entry
-	next  *Entry
+	ev   Data
+	prev *Entry
+	next *Entry
 }
 // TODO(mde): implement disabled events
 
@@ -37,14 +43,12 @@ type Queue struct {
 
 	// other
 	maxEventsSeen int32
-
 	// TODO(mde): implement MWMsg
 }
 
 var watchers []*Watcher
-var q Queue
 
-func StartQueue() error {
+func (q *Queue) StartQueue() error {
 	if q.lock == nil {
 		q.lock = &sync.Mutex{}
 	}
@@ -52,7 +56,7 @@ func StartQueue() error {
 	return nil
 }
 
-func StopQueue()  {
+func (q *Queue) StopQueue()  {
 	if q.lock != nil {
 		q.lock.Lock()
 		defer q.lock.Unlock()
@@ -69,10 +73,10 @@ func StopQueue()  {
 }
 
 
-func Add(event Event) error {
+func (q *Queue) Add(ev Event) error {
 	initialCount := atomic.LoadInt32(&q.count)
 	if initialCount >= MaxQueued {
-		return errors.New("event queue is full")
+		return errors.New("ev queue is full")
 	}
 
 	var entry *Entry
@@ -82,7 +86,7 @@ func Add(event Event) error {
 		entry = q.free
 		q.free = q.free.next
 	}
-	e   ntry.event = event.Raw()
+	entry.ev = ev.Raw()
 
 	if q.tail != nil {
 		q.tail.next = entry
@@ -91,7 +95,7 @@ func Add(event Event) error {
 		entry.next = nil
 	} else {
 		if q.head != nil {
-			panic("invalid queue state")
+			panic("invalid queue state, tail exists without head")
 		}
 		q.head = entry
 		q.tail = entry
@@ -105,4 +109,106 @@ func Add(event Event) error {
 	}
 
 	return nil
+}
+
+func (q *Queue) Cut(entry *Entry) {
+	if entry.prev != nil {
+		entry.prev.next = entry.next
+	}
+	if entry.next != nil {
+		entry.next.prev = entry.prev
+	}
+	if entry == q.head {
+		if entry.prev != nil {
+			panic("invalid ev queue state, queue head is not beginning")
+		}
+		q.head = entry.next
+	}
+	if entry == q.tail {
+		if entry.next != nil {
+			panic("invalid ev queue state, queue tail is not the end")
+		}
+		q.tail = entry.prev
+	}
+	entry.next = q.free
+	q.free = entry
+	atomic.AddInt32(&q.count, -1)
+}
+
+// Note: removed numevents to just use the slice length
+func (q *Queue) Peep(events []Event, action int, minType, maxType uint32) (int, error) {
+	if atomic.LoadInt32(&q.active) == 0 {
+		return 0, errors.New("the ev queue is not active")
+	}
+	if q.lock == nil {
+		return 0, errors.New("ev queue lock doesn't exist")
+	}
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	used := 0
+	switch action {
+	case Add:
+		for _, ev := range events {
+			if err := q.Add(ev); err != nil {
+				return used, errors.Wrap(err, "unable to add event")
+			}
+			used++
+		}
+	case Get:
+		// TODO(mde): deal with wmmsg types
+		fallthrough
+	case Peek:
+		for entry := q.head; entry != nil && (events == nil || used < len(events)); entry = entry.next {
+			if !(minType <= entry.ev.Type() && entry.ev.Type() <= maxType) {
+				continue
+			}
+			if events != nil {
+				events[used] = entry.ev
+				if entry.ev.Type() == SysWMEvent {
+					// TODO(mde): deal with wmmsg types
+				}
+
+				if action == Get {
+					q.Cut(entry)
+				}
+			}
+			used++
+		}
+	default:
+		return 0, errors.New("invalid action type")
+	}
+
+	return used, nil
+}
+
+func (q *Queue) HasType(evType uint32) (bool, error) {
+	cnt, err := q.Peep(nil, Peek, evType, evType)
+	return cnt > 0, errors.Wrap(err, "unable to peep")
+}
+
+func (q *Queue) HasTypes(minType, maxType uint32) (bool, error) {
+	cnt, err := q.Peep(nil, Peek, minType, maxType)
+	return cnt > 0, errors.Wrap(err, "unable to peep")
+}
+
+func (q *Queue) FlushType(evType uint32) error {
+	return q.FlushTypes(evType, evType)
+}
+
+func (q *Queue) FlushTypes(minType, maxType uint32) error {
+	if atomic.LoadInt32(&q.active) == 0 {
+		return nil
+	}
+	if q.lock == nil {
+		return errors.New("ev queue lock doesn't exist")
+	}
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	for entry := q.head; entry != nil; entry = entry.next {
+		if minType <= entry.ev.Type() && entry.ev.Type() <= maxType {
+			q.Cut(entry)
+		}
+	}
 }
