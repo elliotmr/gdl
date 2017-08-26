@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"github.com/pkg/errors"
+	"time"
 )
 
 const MaxQueued = 65535
@@ -15,6 +16,11 @@ const (
 )
 
 type Filter func(userdata interface{}, event Event) bool
+
+//
+type Pumper interface {
+	Pump(q *Queue)
+}
 
 type Watcher struct {
 	Callback Filter
@@ -44,6 +50,9 @@ type Queue struct {
 	// other
 	maxEventsSeen int32
 	// TODO(mde): implement MWMsg
+
+	// input sources
+	sources []Pumper
 }
 
 var watchers []*Watcher
@@ -211,4 +220,22 @@ func (q *Queue) FlushTypes(minType, maxType uint32) error {
 			q.Cut(entry)
 		}
 	}
+}
+
+func (q *Queue) Pump() {
+	for _, p := range q.sources {
+		p.Pump(q)
+	}
+
+	// TODO(mde) : Pending Quit?
+}
+
+func (q *Queue) WaitTimeout(timeout time.Duration) (*Event, error) {
+	expiration := time.Now().Add(timeout)
+
+	for {
+		q.Pump()
+
+	}
+
 }
