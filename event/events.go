@@ -4,6 +4,12 @@ import "encoding/binary"
 
 const KeyReleased = 0
 const KeyPressed = 1
+const (
+	FirstEvent = 0x0000
+	UserEvent = 0x8000
+	LastEvent = 0xFFFF
+)
+
 
 // Application Events
 const (
@@ -105,9 +111,5 @@ const (
 	RenderDeviceReset
 )
 
-const (
-	UserEvent = 0x8000
-	LastEvent = 0xFFFF
-)
 
 

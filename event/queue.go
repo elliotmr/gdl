@@ -1,10 +1,12 @@
 package event
 
 import (
+	"github.com/pkg/errors"
 	"sync"
 	"sync/atomic"
-	"github.com/pkg/errors"
 	"time"
+	"encoding/binary"
+	"github.com/elliotmr/gdl/ticker"
 )
 
 const MaxQueued = 65535
@@ -14,6 +16,16 @@ const (
 	Peek
 	Get
 )
+
+
+var WaitTimeoutExceeded error = eventFilteredError{}
+
+type eventFilteredError struct{}
+
+func (eventFilteredError) Error() string   { return "wait timeout exceeded" }
+func (eventFilteredError) Timeout() bool   { return true }
+func (eventFilteredError) Temporary() bool { return true }
+
 
 type Filter func(userdata interface{}, event Event) bool
 
@@ -32,6 +44,7 @@ type Entry struct {
 	prev *Entry
 	next *Entry
 }
+
 // TODO(mde): implement disabled events
 
 type Queue struct {
@@ -40,7 +53,7 @@ type Queue struct {
 
 	// Atomics
 	active int32
-	count int32
+	count  int32
 
 	// pointers
 	head *Entry
@@ -51,21 +64,35 @@ type Queue struct {
 	maxEventsSeen int32
 	// TODO(mde): implement MWMsg
 
-	// input sources
+	// i/o sources sources
 	sources []Pumper
+	watchers []*Watcher
+	wmu *sync.Mutex
+
+	// event filter
+	ok Filter
+	okdata interface{}
+
+	disabled [256][8]uint32
 }
 
-var watchers []*Watcher
-
-func (q *Queue) StartQueue() error {
+func (q *Queue) Start() error {
+	if q == nil {
+		q = &Queue{}
+	}
 	if q.lock == nil {
 		q.lock = &sync.Mutex{}
+		q.wmu = &sync.Mutex{}
 	}
+	q.Disable(TextInput)
+	q.Disable(TextEditing)
+	q.Disable(SysWMEvent)
+
 	atomic.StoreInt32(&q.active, 1)
 	return nil
 }
 
-func (q *Queue) StopQueue()  {
+func (q *Queue) Stop() {
 	if q.lock != nil {
 		q.lock.Lock()
 		defer q.lock.Unlock()
@@ -78,9 +105,8 @@ func (q *Queue) StopQueue()  {
 	q.tail = nil
 	q.free = nil
 
-	watchers = watchers[:0]
+	q.watchers = q.watchers[:0]
 }
-
 
 func (q *Queue) Add(ev Event) error {
 	initialCount := atomic.LoadInt32(&q.count)
@@ -220,6 +246,7 @@ func (q *Queue) FlushTypes(minType, maxType uint32) error {
 			q.Cut(entry)
 		}
 	}
+	return nil
 }
 
 func (q *Queue) Pump() {
@@ -230,12 +257,126 @@ func (q *Queue) Pump() {
 	// TODO(mde) : Pending Quit?
 }
 
-func (q *Queue) WaitTimeout(timeout time.Duration) (*Event, error) {
-	expiration := time.Now().Add(timeout)
+func (q* Queue) Poll() (Event, error) {
+	return q.WaitTimeout(0)
+}
+
+func (q *Queue) Wait() (Event, error) {
+	return q.WaitTimeout(-1)
+}
+
+func (q *Queue) WaitTimeout(timeout time.Duration) (Event, error) {
+	var expiration time.Time
+	if timeout > 0 {
+		expiration = time.Now().Add(timeout)
+	}
 
 	for {
 		q.Pump()
+		buf := make([]Event, 1)
+		n, err := q.Peep(buf, Get, FirstEvent, LastEvent)
+		switch {
+		case err != nil:
+			return nil, errors.Wrap(err, "queue peep error")
+		case n==1:
+			return buf[0], nil
+		case n==0 && timeout != -1 && (timeout == 0 || time.Now().After(expiration)):
+			return nil, WaitTimeoutExceeded
+		default:
+			// I don't really like this, but they do the same in SDL2
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
 
+func (q *Queue) Push(ev Event) (bool, error) {
+	binary.LittleEndian.PutUint32(ev.Raw()[:4], ticker.GetAsMS())
+	if !q.ok(q.okdata, ev) {
+		return false, nil
 	}
 
+	q.wmu.Lock()
+	for _, w := range q.watchers {
+		w.Callback(w.Userdata, ev)
+	}
+	q.wmu.Unlock()
+
+	buf := make([]Event, 1)
+	_, err := q.Peep(buf, Add, 0, 0)
+	if err != nil {
+		return true, errors.Wrap(err, "unable to add event to queue")
+	}
+
+	// TODO(mde): Add gesture event processing
+
+	return true, nil
+}
+
+func (q *Queue) SetFilter(f Filter, userdata interface{}) error {
+	err := q.FlushTypes(FirstEvent, LastEvent)
+	if err != nil {
+		errors.Wrap(err, "unable to flush queue")
+	}
+	q.ok = f
+	q.okdata = userdata
+	return nil
+}
+
+func (q *Queue) GetFilterr() (Filter, interface{}) {
+	return q.ok, q.okdata
+}
+
+func (q *Queue) AddWatch(watcher *Watcher) {
+	q.wmu.Lock()
+	defer q.wmu.Unlock()
+	q.watchers = append(q.watchers, watcher)
+}
+
+func (q *Queue) DelWatch(watcher *Watcher) {
+	q.wmu.Lock()
+	defer q.wmu.Unlock()
+	updatedWatchers := q.watchers[:0]
+	for _, w := range q.watchers {
+		if !(w == watcher) {
+			updatedWatchers = append(updatedWatchers, w)
+		}
+	}
+	q.watchers = updatedWatchers
+}
+
+func (q *Queue) Filter(f Filter, userdata interface{}) error {
+	if atomic.LoadInt32(&q.active) == 0 {
+		return nil
+	}
+	if q.lock == nil {
+		return errors.New("ev queue lock doesn't exist")
+	}
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	for entry := q.head; entry != nil; entry = entry.next {
+		if !f(userdata, entry.ev) {
+			q.Cut(entry)
+		}
+	}
+	return nil
+}
+
+func (q *Queue) Disable(ev Event) {
+	hi := uint8((ev.Type() >> 8) & 0xFF)
+	lo := uint8(ev.Type() & 0xFF)
+	q.disabled[hi][lo/32] |= 1 << (lo & 31)
+	q.FlushType(ev.Type())
+}
+
+func (q *Queue) Enable(ev Event) {
+	hi := uint8((ev.Type() >> 8) & 0xFF)
+	lo := uint8(ev.Type() & 0xFF)
+	q.disabled[hi][lo/32] &^= 1 << (lo & 31)
+}
+
+func (q *Queue) Enabled(ev Event) bool {
+	hi := uint8((ev.Type() >> 8) & 0xFF)
+	lo := uint8(ev.Type() & 0xFF)
+	return q.disabled[hi][lo/32] & 1 << (lo & 31) == 0
 }
