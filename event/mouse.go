@@ -10,7 +10,6 @@ const (
 	MouseWheel
 )
 
-
 // Keyboard button event structure (event.key.*)
 type MouseButton Data
 

@@ -1,12 +1,12 @@
 package event
 
 import (
+	"encoding/binary"
+	"github.com/elliotmr/gdl/ticker"
 	"github.com/pkg/errors"
 	"sync"
 	"sync/atomic"
 	"time"
-	"encoding/binary"
-	"github.com/elliotmr/gdl/ticker"
 )
 
 const MaxQueued = 65535
@@ -17,7 +17,6 @@ const (
 	Get
 )
 
-
 var WaitTimeoutExceeded error = eventFilteredError{}
 
 type eventFilteredError struct{}
@@ -25,7 +24,6 @@ type eventFilteredError struct{}
 func (eventFilteredError) Error() string   { return "wait timeout exceeded" }
 func (eventFilteredError) Timeout() bool   { return true }
 func (eventFilteredError) Temporary() bool { return true }
-
 
 type Filter func(userdata interface{}, event Event) bool
 
@@ -65,12 +63,12 @@ type Queue struct {
 	// TODO(mde): implement MWMsg
 
 	// i/o sources sources
-	sources []Pumper
+	sources  []Pumper
 	watchers []*Watcher
-	wmu *sync.Mutex
+	wmu      *sync.Mutex
 
 	// event filter
-	ok Filter
+	ok     Filter
 	okdata interface{}
 
 	disabled [256][8]uint32
@@ -257,7 +255,7 @@ func (q *Queue) Pump() {
 	// TODO(mde) : Pending Quit?
 }
 
-func (q* Queue) Poll() (Event, error) {
+func (q *Queue) Poll() (Event, error) {
 	return q.WaitTimeout(0)
 }
 
@@ -278,9 +276,9 @@ func (q *Queue) WaitTimeout(timeout time.Duration) (Event, error) {
 		switch {
 		case err != nil:
 			return nil, errors.Wrap(err, "queue peep error")
-		case n==1:
+		case n == 1:
 			return buf[0], nil
-		case n==0 && timeout != -1 && (timeout == 0 || time.Now().After(expiration)):
+		case n == 0 && timeout != -1 && (timeout == 0 || time.Now().After(expiration)):
 			return nil, WaitTimeoutExceeded
 		default:
 			// I don't really like this, but they do the same in SDL2
@@ -378,5 +376,5 @@ func (q *Queue) Enable(ev Event) {
 func (q *Queue) Enabled(ev Event) bool {
 	hi := uint8((ev.Type() >> 8) & 0xFF)
 	lo := uint8(ev.Type() & 0xFF)
-	return q.disabled[hi][lo/32] & 1 << (lo & 31) == 0
+	return q.disabled[hi][lo/32]&1<<(lo&31) == 0
 }

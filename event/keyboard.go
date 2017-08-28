@@ -11,7 +11,6 @@ const (
 	KeyMapChanged
 )
 
-
 // Keyboard button event structure (event.key.*)
 type KeyboardEvent Data
 

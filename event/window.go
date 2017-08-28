@@ -8,7 +8,6 @@ const (
 	SysWMEvent
 )
 
-
 // Window state change event data (event.window.*)
 type Window Data
 

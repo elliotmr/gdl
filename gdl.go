@@ -1,10 +1,9 @@
 package gdl
 
 import (
-	"github.com/pkg/errors"
-	"time"
-	"github.com/elliotmr/gdl/ticker"
 	"github.com/elliotmr/gdl/event"
+	"github.com/elliotmr/gdl/ticker"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -23,17 +22,17 @@ const InitEverything = InitTimer | InitAudio | InitVideo | InitJoystick | InitHa
 var EventLoop *event.Queue
 
 func Init(flags uint32) error {
-	if flags & InitGameController > 0 {
+	if flags&InitGameController > 0 {
 		// game controller implies joystick
 		flags |= InitJoystick
 	}
 
-	if flags & (InitVideo | InitJoystick) > 0 {
+	if flags&(InitVideo|InitJoystick) > 0 {
 		// video or joystick implies event
 		flags |= InitEvents
 	}
 
-	if flags & (InitHaptic | InitJoystick) > 0 {
+	if flags&(InitHaptic|InitJoystick) > 0 {
 		if err := helperWindowCreate(); err != nil {
 			return errors.Wrap(err, "failed initializing joystick")
 		}
@@ -41,7 +40,7 @@ func Init(flags uint32) error {
 
 	ticker.Initialize()
 
-	if flags & InitEvents > 0 {
+	if flags&InitEvents > 0 {
 		EventLoop.Start()
 	}
 

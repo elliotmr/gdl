@@ -204,5 +204,4 @@ const (
 	KPPlusMinus
 	KPClear
 	KPClearEntry
-
 )

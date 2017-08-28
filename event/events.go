@@ -6,10 +6,9 @@ const KeyReleased = 0
 const KeyPressed = 1
 const (
 	FirstEvent = 0x0000
-	UserEvent = 0x8000
-	LastEvent = 0xFFFF
+	UserEvent  = 0x8000
+	LastEvent  = 0xFFFF
 )
-
 
 // Application Events
 const (
@@ -22,7 +21,7 @@ const (
 	AppDidEnterForeground
 )
 
-// Data is the raw event data, 
+// Data is the raw event data,
 type Data [56]byte
 
 func (ed Data) Type() uint32 {
@@ -42,14 +41,6 @@ type Event interface {
 	Timestamp() uint32
 	Raw() Data
 }
-
-
-
-
-
-
-
-
 
 // Joystick Events
 const (
@@ -110,6 +101,3 @@ const (
 	RenderTargetsReset = 0x2000 + iota
 	RenderDeviceReset
 )
-
-
-

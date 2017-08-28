@@ -3,13 +3,13 @@
 package gdl
 
 import (
-	"golang.org/x/sys/windows"
 	"github.com/AllenDang/w32"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/windows"
 )
 
 const (
-	NULL = 0
+	NULL                       = 0
 	ERROR_CLASS_ALREADY_EXISTS = 1410
 )
 
@@ -23,9 +23,9 @@ func helperWindowCreate() error {
 	hInstance := w32.GetModuleHandle("")
 
 	wce := w32.WNDCLASSEX{
-		WndProc: windows.NewCallback(w32.DefWindowProc),
+		WndProc:   windows.NewCallback(w32.DefWindowProc),
 		ClassName: windows.StringToUTF16Ptr(helperWindowClassName),
-		Instance: hInstance,
+		Instance:  hInstance,
 	}
 	helperWindowClass = w32.RegisterClassEx(&wce)
 	if helperWindowClass == 0 && w32.GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
