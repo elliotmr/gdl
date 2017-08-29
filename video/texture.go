@@ -1,11 +1,11 @@
 package video
 
 type Point struct {
-	x, y float32
+	x, y int
 }
 
 type Rect struct {
-	x, y, w, h float32
+	x, y, w, h int
 }
 
 type Texture struct {
