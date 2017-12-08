@@ -57,6 +57,5 @@ func CreateRenderer(window *Window, flags uint32) (*Renderer, error) {
 	if window  == nil {
 		return nil, errors.New("invalid window")
 	}
-
-
+	return nil, nil
 }

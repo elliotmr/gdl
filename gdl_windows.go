@@ -6,6 +6,7 @@ import (
 	"github.com/AllenDang/w32"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
+	"syscall"
 )
 
 const (
@@ -27,9 +28,10 @@ func helperWindowCreate() error {
 		ClassName: windows.StringToUTF16Ptr(helperWindowClassName),
 		Instance:  hInstance,
 	}
-	helperWindowClass = w32.RegisterClassEx(&wce)
-	if helperWindowClass == 0 && w32.GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
-		return errors.New("unable to create helper window class")
+	var err error
+	helperWindowClass, err = w32.RegisterClassEx(&wce)
+	if err != nil && err.(syscall.Errno) != ERROR_CLASS_ALREADY_EXISTS {
+		return errors.Wrap(err, "unable to create helper window class")
 	}
 
 	helperWindow = w32.CreateWindowEx(

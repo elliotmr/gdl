@@ -1,6 +1,7 @@
 package scancode
 
 const Unknown = 0
+const Max = 512
 
 const (
 	A = 4 + iota
@@ -38,7 +39,7 @@ const (
 	Seven
 	Eight
 	Nine
-	Ten
+	Zero
 	Return
 	Escape
 	Backspace
@@ -83,6 +84,7 @@ const (
 	Down
 	Up
 	NumLockClear
+	KPDivide
 	KPMultiply
 	KPMinus
 	KPPlus
@@ -128,10 +130,9 @@ const (
 	Mute
 	VolumeUp
 	VolumeDown
-	_
-	_
-	_
-	KPComma
+)
+const (
+	KPComma = 133 + iota
 	KPEqualsAs400
 	International1
 	International2
@@ -152,7 +153,7 @@ const (
 	Lang8
 	Lang9
 	AltErase
-	SysEq
+	SysReq
 	Cancel
 	Clear
 	Prior
@@ -163,7 +164,10 @@ const (
 	ClearAgain
 	CRSel
 	EXSel
-	KP00
+)
+
+const (
+	KP00 = 176 + iota
 	KP000
 	ThousandsSeparator
 	DecimalSeparator
@@ -204,4 +208,50 @@ const (
 	KPPlusMinus
 	KPClear
 	KPClearEntry
+	KPBinary
+	KPOctal
+	KPDecimal
+	KPHexadecimal
+)
+
+const (
+	LCtrl = 224 + iota
+	LShift
+	LAlt
+	LGui
+	RCtrl
+	RShift
+	RAlt
+	RGui
+)
+
+const (
+	Mode = 257 + iota
+	AudioNext
+	AudioPrev
+	AudioStop
+	AudioPlay
+	AudioMute
+	MediaSelect
+	WWW
+	Mail
+	Calculator
+	Computer
+	ACSearch
+	ACHome
+	ACBack
+	ACForward
+	ACStop
+	ACRefresh
+	ACBookmarks
+	BrightnessDown
+	BrightnessUp
+	DisplaySwitch
+	KBDIllumToggle
+	KBDIllumDown
+	KBDIllumUp
+	Eject
+	Sleep
+	App1
+	App2
 )

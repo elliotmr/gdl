@@ -17,6 +17,14 @@ const (
 	Get
 )
 
+var Q *Queue
+
+func init() {
+	Q = &Queue{}
+	Q.Start()
+}
+
+
 var WaitTimeoutExceeded error = eventFilteredError{}
 
 type eventFilteredError struct{}
@@ -119,7 +127,7 @@ func (q *Queue) Add(ev Event) error {
 		entry = q.free
 		q.free = q.free.next
 	}
-	entry.ev = ev.Raw()
+	entry.ev = *ev.Raw()
 
 	if q.tail != nil {
 		q.tail.next = entry
@@ -288,7 +296,7 @@ func (q *Queue) WaitTimeout(timeout time.Duration) (Event, error) {
 }
 
 func (q *Queue) Push(ev Event) (bool, error) {
-	binary.LittleEndian.PutUint32(ev.Raw()[:4], ticker.GetAsMS())
+	binary.LittleEndian.PutUint32(ev.Raw()[0:4], ticker.GetAsMS())
 	if !q.ok(q.okdata, ev) {
 		return false, nil
 	}
@@ -360,21 +368,21 @@ func (q *Queue) Filter(f Filter, userdata interface{}) error {
 	return nil
 }
 
-func (q *Queue) Disable(ev Event) {
-	hi := uint8((ev.Type() >> 8) & 0xFF)
-	lo := uint8(ev.Type() & 0xFF)
+func (q *Queue) Disable(eventType uint32) {
+	hi := uint8((eventType >> 8) & 0xFF)
+	lo := uint8(eventType & 0xFF)
 	q.disabled[hi][lo/32] |= 1 << (lo & 31)
-	q.FlushType(ev.Type())
+	q.FlushType(eventType)
 }
 
-func (q *Queue) Enable(ev Event) {
-	hi := uint8((ev.Type() >> 8) & 0xFF)
-	lo := uint8(ev.Type() & 0xFF)
+func (q *Queue) Enable(eventType uint32) {
+	hi := uint8((eventType >> 8) & 0xFF)
+	lo := uint8(eventType & 0xFF)
 	q.disabled[hi][lo/32] &^= 1 << (lo & 31)
 }
 
-func (q *Queue) Enabled(ev Event) bool {
-	hi := uint8((ev.Type() >> 8) & 0xFF)
-	lo := uint8(ev.Type() & 0xFF)
+func (q *Queue) Enabled(eventType uint32) bool {
+	hi := uint8((eventType >> 8) & 0xFF)
+	lo := uint8(eventType & 0xFF)
 	return q.disabled[hi][lo/32]&1<<(lo&31) == 0
 }

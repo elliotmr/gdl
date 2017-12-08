@@ -10,6 +10,12 @@ const (
 	MouseWheel
 )
 
+var M *Mouse
+
+func init() {
+	M = &Mouse{}
+}
+
 // Keyboard button event structure (event.key.*)
 type MouseButton Data
 
@@ -39,4 +45,12 @@ func (mbe MouseButton) X() int32 {
 
 func (mbe MouseButton) Y() int32 {
 	return int32(binary.LittleEndian.Uint16(mbe[24:26]))
+}
+
+type Mouse struct {
+
+}
+
+func (m *Mouse) FreeCursor() {
+
 }

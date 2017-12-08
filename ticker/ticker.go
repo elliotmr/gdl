@@ -2,6 +2,8 @@ package ticker
 
 import "time"
 
+
+// TODO: make a windows version that uses GetTick
 var Start time.Time
 
 func Initialize() {

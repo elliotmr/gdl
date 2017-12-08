@@ -4,12 +4,12 @@ import "github.com/pkg/errors"
 
 // videoDisplay defines the the structure that corresponds to a physical monitor attached to the system.
 type videoDisplay struct  {
-	name string
+	name            string
 	maxDisplayModes int
 	numDisplayModes int
-	modes []DisplayMode
-	desktopMode DisplayMode
-	currentMode DisplayMode
+	modes           []DisplayMode
+	desktopMode     DisplayMode
+	currentMode     DisplayMode
 
 	fullscreenWindow *Window
 	device           videoDevice

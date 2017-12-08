@@ -32,14 +32,14 @@ func (ed Data) Timestamp() uint32 {
 	return binary.LittleEndian.Uint32(ed[4:8])
 }
 
-func (ed Data) Raw() Data {
-	return ed
+func (ed Data) Raw() *Data {
+	return &ed
 }
 
 type Event interface {
 	Type() uint32
 	Timestamp() uint32
-	Raw() Data
+	Raw() *Data
 }
 
 // Joystick Events
