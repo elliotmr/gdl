@@ -1,25 +1,85 @@
 package wl
+
+import (
+	"encoding/binary"
+	"fmt"
+	"os"
+)
+
 {{- range .Interfaces }}{{$ifn := ifname .Name}}
 {{ range .Enums }}{{$enn := camel .Name}}
-{{ range .Entries }}
-const {{$ifn}}{{$enn}}{{camel .Name }} = {{.Value}} // {{.Summary}}{{ end }}
+const ({{ range .Entries }}
+    {{$ifn}}{{$enn}}{{camel .Name }} = {{.Value}} // {{.Summary}}{{ end }}
+)
 {{ end }}
+const ({{ range $i, $e := .Events }}
+    opCode{{$ifn}}{{camel .Name }} = {{$i}}{{ end }}
+)
+
+const ({{ range $i, $e := .Requests }}
+	opCode{{$ifn}}{{camel .Name }} = {{$i}}{{ end }}
+)
+
+// {{$ifn}} Events
+{{ range .Events}}//
+// {{camel .Name}}
+{{desc_to_comment .Description.Text}} {{- end -}}
 type {{$ifn}}Listener interface {
 {{- range .Events }}
     {{camel .Name }}({{req_sig .Args}}){{ end }}
 }
 
 {{desc_to_comment .Description.Text}}type {{ $ifn }} struct {
-    ObjectID
-    Listener {{$ifn}}Listener
+    id ObjectID
+    l  {{$ifn}}Listener
+	c  *Client
+}
+
+func (c *Client) New{{ $ifn }}() *{{ $ifn }} {
+	o := &{{ $ifn }}{
+		id: GetNewID(),
+		c: c,
+	}
+	c.objects[o.ID()] = o
+	return o
+}
+
+func (this *{{$ifn}}) ID() ObjectID {
+	return this.id
+}
+
+func (this *{{$ifn}}) Dispatch(opCode uint16, payload []byte, file *os.File) {
+	switch opCode {
+	{{ range .Events }}case opCode{{$ifn}}{{camel .Name }}:
+		if this.l == nil {
+			fmt.Println("ignoring {{camel .Name}} event: no listener")
+		} else {
+			off, len := 0, 0
+			_, _ = off, len
+{{arg_decode .Args}}
+			this.l.{{camel .Name}}({{evt_call .Args}})
+        }
+	{{ end }}
+    }
 }
 
 func (this *{{$ifn}}) SetListener(listener {{$ifn}}Listener) {
-    this.Listener = listener
+    this.l = listener
 }
 {{ range .Requests }}
 {{desc_to_comment .Description.Text}}func (this *{{$ifn}}) {{camel .Name}}({{req_sig .Args}}) {{req_ret_sig .Args}} {
+	this.c.mu.Lock()
+	defer this.c.mu.Unlock()
+	this.c.buf.Reset()
+	var tmp int32
+	_ = tmp
+	var oob []byte
+	binary.Write(this.c.buf, hostByteOrder, this.ID())
+	binary.Write(this.c.buf, hostByteOrder, uint32(0))
+{{arg_encode .Args}}
+	hostByteOrder.PutUint32(this.c.buf.Bytes()[4:8], uint32(this.c.buf.Len()) << 16 | opCode{{$ifn}}{{camel .Name }})
+	fmt.Println("Sending: ")
+	fmt.Println(hex.Dump(this.c.buf.Bytes()))
+	this.c.conn.WriteMsgUnix(this.c.buf.Bytes(), oob, nil)
     return {{req_ret .Args}}
-}
-{{ end }}
-{{ end }}
+}{{ end }}{{ end }}
