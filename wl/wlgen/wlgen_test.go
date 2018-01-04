@@ -5,10 +5,12 @@ import (
 	"io/ioutil"
 	"github.com/stretchr/testify/assert"
 	"os"
+	"bytes"
+	"go/format"
 )
 
 func TestParse(t *testing.T) {
-	data, err := ioutil.ReadFile("wayland.xml")
+	data, err := ioutil.ReadFile("xdg-shell-unstable-v6.xml")
 	assert.NoError(t, err)
 	p, err := parse(data)
 	assert.NoError(t, err)
@@ -39,8 +41,44 @@ func TestGenTemplate(t *testing.T) {
 	assert.NoError(t, err)
 	tmplText, err := ioutil.ReadFile("wl.gotmpl")
 	assert.NoError(t, err)
-	tmpl := genTemplate(string(tmplText))
+	genTemplate(string(tmplText))
 	f, err := os.Create("../protocol.go")
 	assert.NoError(t, err)
-	tmpl.Execute(f, p)
+	T.ExecuteTemplate(f, "base", p)
+}
+
+func TestGenTemplateWLP(t *testing.T) {
+	data, err := ioutil.ReadFile("wayland.xml")
+	assert.NoError(t, err)
+	p, err := parse(data)
+	assert.NoError(t, err)
+	tmplText, err := ioutil.ReadFile("wlp.gotmpl")
+	assert.NoError(t, err)
+	genTemplate(string(tmplText))
+	buf := &bytes.Buffer{}
+	assert.NoError(t, T.ExecuteTemplate(buf, "root", p))
+	f, err := os.Create("../wlp/wayland.go")
+	assert.NoError(t, err)
+	//f.Write(buf.Bytes())
+	out, err := format.Source(buf.Bytes())
+	assert.NoError(t, err)
+	f.Write(out)
+}
+
+func TestGenTemplateXDG(t *testing.T) {
+	data, err := ioutil.ReadFile("xdg-shell-unstable-v6.xml")
+	assert.NoError(t, err)
+	p, err := parse(data)
+	assert.NoError(t, err)
+	tmplText, err := ioutil.ReadFile("wlp.gotmpl")
+	assert.NoError(t, err)
+	genTemplate(string(tmplText))
+	buf := &bytes.Buffer{}
+	assert.NoError(t, T.ExecuteTemplate(buf, "root", p))
+	f, err := os.Create("../wlp/xdg-shell.go")
+	assert.NoError(t, err)
+	//f.Write(buf.Bytes())
+	out, err := format.Source(buf.Bytes())
+	assert.NoError(t, err)
+	f.Write(out)
 }

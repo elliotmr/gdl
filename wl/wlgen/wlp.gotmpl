@@ -1,0 +1,216 @@
+{{define "root"}}
+package wlp
+
+import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"os"
+
+	"github.com/pkg/errors"
+)
+
+{{- range .Interfaces }}{{ifname .Name | set "ifn"}} {{set "ifr" .Name}}
+{{template "interface-constants" .}}
+{{template "interface-listener" .}}
+{{template "interface-typedef" .}}
+{{template "interface-methods" .}}
+
+{{ range .Requests }}{{template "request-func" .}}{{ end }}
+{{ end }}
+{{ end }}
+
+{{define "interface-constants"}}
+{{ range .Enums }}{{$enn := camel .Name}}
+{{if .Entries}}const ({{ range .Entries }}
+{{get "ifn"}}{{$enn}}{{camel .Name }} = {{.Value}} // {{.Summary}}{{ end }}
+){{end}}
+{{ end }}
+{{if .Events}}const ({{ range $i, $e := .Events }}
+	opCode{{get "ifn"}}{{camel .Name }} = {{$i}}{{ end }}
+){{end}}
+
+{{if .Requests}}const ({{ range $i, $e := .Requests }}
+	opCode{{get "ifn"}}{{camel .Name }} = {{$i}}{{ end }}
+){{end}}
+{{end}}
+
+{{define "interface-listener"}}
+// {{get "ifn"}} Events
+{{ range .Events}}//
+// {{camel .Name}}
+{{desc_to_comment .Description.Text}} {{- end -}}
+type {{get "ifn"}}Listener interface {
+{{- range .Events }}
+{{camel .Name }}({{req_sig .Args}}){{ end }}
+}
+{{end}}
+
+{{define "interface-typedef"}}
+{{desc_to_comment .Description.Text}}type {{ get "ifn" }} struct {
+i  uint32
+l  {{get "ifn"}}Listener
+c  *Context
+}
+
+func new{{ get "ifn" }}(c *Context) Object {
+	o := &{{ get "ifn" }}{
+		i: c.next(),
+		c: c,
+	}
+	c.obj[o.i] = o
+	return o
+}
+
+func init() {
+	if constructors == nil {
+		constructors = make(map[string]constructor)
+	}
+	constructors["{{get "ifr"}}"] = new{{get "ifn"}}
+}
+{{end}}
+
+{{define "interface-methods"}}
+// ID returns the wayland object identifier
+func (this *{{get "ifn"}}) ID() uint32 {
+	return this.i
+}
+
+// Type returns the string wayland type
+func (this *{{get "ifn"}}) Type() string {
+	return "{{get "ifr"}}"
+}
+
+func (this *{{get "ifn"}}) setListener(listener interface{}) error {
+	l, ok := listener.({{get "ifn"}}Listener)
+	if !ok {
+		return errors.Errorf("listener must implement {{get "ifn"}} interface")
+	}
+	this.l = l
+	return nil
+}
+
+func (this *{{get "ifn"}}) dispatch(opCode uint16, payload []byte, file *os.File) {
+	var len int
+	_ = len
+	switch opCode {
+	{{ range .Events }}case opCode{{get "ifn"}}{{camel .Name }}:
+		if this.l == nil {
+			fmt.Println("ignoring {{camel .Name}} event: no listener")
+		} else {
+			fmt.Println("Received {{get "ifn"}} -> {{camel .Name}}: Dispatching")
+			{{if .Args}}buf := bytes.NewBuffer(payload)
+			_ = buf
+			{{arg_decode .Args}}{{end}}
+			this.l.{{camel .Name}}({{evt_call .Args}})
+		}
+	{{ end }}
+	}
+}
+{{end}}
+
+{{define "request-func"}}
+{{if .Description}}{{desc_to_comment .Description.Text}}{{end -}}
+func (this *{{get "ifn"}}) {{camel .Name}}({{req_sig .Args}}) {{req_ret_sig .Args}} {
+	if this == nil {
+		return {{if is_constructor .Args}}nil, {{end}}errors.New("object is nil")
+	}
+	if this.c.Err != nil {
+		return {{if is_constructor .Args}}nil, {{end}}errors.Wrap(this.c.Err, "global wayland error")
+	}
+	this.c.mu.Lock()
+	defer this.c.mu.Unlock()
+	_, exists := this.c.obj[this.i]
+	if !exists {
+		return {{if is_constructor .Args}}nil, {{end}}errors.New("object has been deleted")
+	}
+	this.c.buf.Reset()
+	var tmp int32
+	_ = tmp
+	var oob []byte
+	binary.Write(this.c.buf, hostByteOrder, this.i)
+	binary.Write(this.c.buf, hostByteOrder, uint32(0))
+	{{arg_encode .Args -}}
+	hostByteOrder.PutUint32(this.c.buf.Bytes()[4:8], uint32(this.c.buf.Len()) << 16 | opCode{{get "ifn"}}{{camel .Name }})
+	{{if is_constructor .Args}}ret.l = l{{end}}
+	fmt.Println("Sending {{get "ifn"}} -> {{camel .Name}}")
+	fmt.Println(hex.Dump(this.c.buf.Bytes()))
+	this.c.c.WriteMsgUnix(this.c.buf.Bytes(), oob, nil)
+	return {{req_ret .Args}}
+}
+{{end}}
+
+{{define "encode-base" -}}
+binary.Write(this.c.buf, hostByteOrder, uint32({{.}}))
+{{end}}
+
+{{define "encode-fixed" -}}
+binary.Write(this.c.buf, hostByteOrder, float64ToFixed({{.}}))
+{{end}}
+
+
+{{define "encode-string" -}}
+binary.Write(this.c.buf, hostByteOrder, uint32(len({{.}}) + 1))
+this.c.buf.WriteString({{.}})
+this.c.buf.WriteByte(0)
+if (len({{.}}) + 1) % 4 != 0 {
+	this.c.buf.Write(make([]byte, 4 - (len({{.}}) + 1) % 4))
+}
+{{end}}
+
+{{define "encode-array" -}}
+binary.Write(this.c.buf, hostByteOrder, uint32(len({{.}}) + 1))
+this.c.buf.WriteString({{.}})
+if (len({{.}}) % 4 != 0) {
+	this.c.buf.Write(make([]byte, 4 - (len({{.}})) % 4))
+}
+{{end}}
+
+{{define "encode-new-id" -}}
+ret := new{{.}}(this.c).(*{{.}})
+{{template "encode-base" "ret.i"}}
+{{- end}}
+
+{{define "encode-bind" -}}
+{{template "encode-string" "iface"}}
+{{- template "encode-base" "version"}}
+{{- template "encode-base" .}}
+{{- end}}
+
+{{define "encode-fd" -}}
+oob = this.c.encodeFD({{.}})
+{{end}}
+
+{{define "decode-int" -}}
+{{.}} := int32(hostByteOrder.Uint32(buf.Next(4)))
+{{end}}
+
+{{define "decode-uint" -}}
+{{.}} := hostByteOrder.Uint32(buf.Next(4))
+{{end}}
+
+{{define "decode-fixed" -}}
+{{.}} := fixedToFloat64(int32(hostByteOrder.Uint32(buf.Next(4))))
+{{end}}
+
+{{define "decode-string" -}}
+len = int(hostByteOrder.Uint32(buf.Next(4)))
+{{.}} := string(buf.Next(len)[:len-1])
+if len % 4 != 0 {
+	buf.Next(4 - (len % 4))
+}
+{{end}}
+
+{{define "decode-array" -}}
+len = int(hostByteOrder.Uint32(buf.Next(4)))
+{{.}} := make([]byte, len)
+buf.Read({{.}})
+if len % 4 != 0 {
+	buf.Next(4 - (len % 4))
+}
+{{end}}
+
+{{define "decode-fd" -}}
+	{{.}} := file
+{{end}}

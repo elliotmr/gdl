@@ -78,7 +78,7 @@ func (this *{{$ifn}}) SetListener(listener {{$ifn}}Listener) {
 	binary.Write(this.c.buf, hostByteOrder, uint32(0))
 {{arg_encode .Args}}
 	hostByteOrder.PutUint32(this.c.buf.Bytes()[4:8], uint32(this.c.buf.Len()) << 16 | opCode{{$ifn}}{{camel .Name }})
-	fmt.Println("Sending: ")
+	fmt.Println("Sending {{camel .Name}}")
 	fmt.Println(hex.Dump(this.c.buf.Bytes()))
 	this.c.conn.WriteMsgUnix(this.c.buf.Bytes(), oob, nil)
     return {{req_ret .Args}}

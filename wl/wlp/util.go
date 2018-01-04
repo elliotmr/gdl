@@ -1,4 +1,4 @@
-package wl
+package wlp
 
 import (
 	"math"
@@ -37,3 +37,10 @@ func intToFixed(i int) int32 {
 	return *(*int32)(unsafe.Pointer(&i32))
 }
 
+func DecodeHeader(buf []byte) (id uint32, opcode uint16, size int) {
+	id = hostByteOrder.Uint32(buf[:4])
+	arg2 := hostByteOrder.Uint32(buf[4:8])
+	opcode = uint16(arg2 & 0xFF)
+	size = int(arg2 >> 16)
+	return
+}

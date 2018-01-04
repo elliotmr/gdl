@@ -1,14 +1,15 @@
 package main
 
 import (
-	"encoding/xml"
-	"github.com/pkg/errors"
-	"github.com/serenize/snaker"
-	"strings"
-	"text/template"
 	"bufio"
 	"bytes"
+	"encoding/xml"
 	"fmt"
+	"strings"
+	"text/template"
+
+	"github.com/pkg/errors"
+	"github.com/serenize/snaker"
 )
 
 type Description struct {
@@ -79,12 +80,19 @@ func parse(raw []byte) (*Protocol, error) {
 	return p, errors.Wrap(err, "unable to parse xml")
 }
 
-func genTemplate(templateText string) *template.Template {
+var T *template.Template
+var D map[string]string
+
+func genTemplate(templateText string) {
 	funcMap := template.FuncMap{
-		"ifname":          InterfaceName,
 		"camel":           snaker.SnakeToCamel,
 		"camel_lower":     snaker.SnakeToCamelLower,
+		"get":             GetGlobal,
+		"set":             SetGlobal,
+		"ifname":          InterfaceName,
+		"arg_name":        ArgName,
 		"desc_to_comment": DescriptionToComment,
+		"is_constructor":  IsConstructor,
 		"req_sig":         ReqSignature,
 		"req_ret_sig":     ReqReturnSignature,
 		"req_ret":         ReqReturn,
@@ -92,14 +100,30 @@ func genTemplate(templateText string) *template.Template {
 		"arg_decode":      ArgDecode,
 		"arg_encode":      ArgEncode,
 	}
+	D = make(map[string]string)
+	T = template.Must(template.New("wl").Funcs(funcMap).Parse(templateText))
+}
 
-	return template.Must(template.New("wl").Funcs(funcMap).Parse(templateText))
+func GetGlobal(key string) string {
+	return D[key]
+}
 
+func SetGlobal(key string, val string) string {
+	D[key] = val
+	return ""
 }
 
 func InterfaceName(name string) string {
 	name = strings.TrimLeft(name, "wl_")
 	return snaker.SnakeToCamel(name)
+}
+
+func ArgName(arg *Arg) string {
+	name := snaker.SnakeToCamelLower(arg.Name)
+	if name == "interface" {
+		name = "iface"
+	}
+	return name
 }
 
 func DescriptionToComment(desc string) string {
@@ -114,15 +138,7 @@ func DescriptionToComment(desc string) string {
 	return buf.String()
 }
 
-func ArgName(arg *Arg) string {
-	name := snaker.SnakeToCamelLower(arg.Name)
-	if name == "interface" {
-		name = "iface"
-	}
-	return name
-}
-
-func ArgSignature(arg *Arg) string {
+func argSignature(arg *Arg) string {
 	name := ArgName(arg)
 	buf := bytes.NewBufferString(name)
 	buf.WriteString(" ")
@@ -141,9 +157,12 @@ func ArgSignature(arg *Arg) string {
 		buf.WriteString("*os.File")
 	case "new_id":
 		if arg.Interface == "" {
-			buf.WriteString("ObjectID")
+			buf.WriteString("uint32")
 		} else {
-			return ""
+			buf.Reset()
+			buf.WriteString("l ")
+			buf.WriteString(InterfaceName(arg.Interface))
+			buf.WriteString("Listener")
 		}
 	default:
 		return ""
@@ -154,7 +173,12 @@ func ArgSignature(arg *Arg) string {
 func ReqSignature(args []*Arg) string {
 	argSigs := make([]string, 0)
 	for _, arg := range args {
-		newSig := ArgSignature(arg)
+		// Special case for bind
+		if arg.Type == "new_id" && arg.Interface == "" {
+			argSigs = append(argSigs, "iface string")
+			argSigs = append(argSigs, "version uint32")
+		}
+		newSig := argSignature(arg)
 		if newSig != "" {
 			argSigs = append(argSigs, newSig)
 		}
@@ -176,6 +200,15 @@ func ReqReturnSignature(args []*Arg) string {
 	return fmt.Sprintf("(*%s, error)", InterfaceName(newTypeInterface))
 }
 
+func IsConstructor(args []*Arg) bool {
+	for _, arg := range args {
+		if arg.Type == "new_id" && arg.Interface != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func ReqReturn(args []*Arg) string {
 	newTypeInterface := ""
 	for _, arg := range args {
@@ -194,7 +227,7 @@ func EvtCall(args []*Arg) string {
 	argSigs := make([]string, 0)
 	for _, arg := range args {
 		name := ArgName(arg)
-		if name != "" && arg.Type != "new_id"{
+		if name != "" && arg.Type != "new_id" {
 			argSigs = append(argSigs, name)
 		}
 	}
@@ -202,6 +235,7 @@ func EvtCall(args []*Arg) string {
 
 }
 
+/*
 func ArgDecode(args []*Arg) string {
 	buf := &bytes.Buffer{}
 	loc := 0
@@ -290,76 +324,57 @@ func ArgDecode(args []*Arg) string {
 	}
 	return buf.String()
 }
+*/
+
+func ArgDecode(args []*Arg) string {
+	buf := &bytes.Buffer{}
+	for _, arg := range args {
+		switch arg.Type {
+		case "int":
+			T.ExecuteTemplate(buf, "decode-int", ArgName(arg))
+		case "uint", "object":
+			T.ExecuteTemplate(buf, "decode-uint", ArgName(arg))
+		case "new_id":
+			// TODO: implement
+		case "fixed":
+			T.ExecuteTemplate(buf, "decode-fixed", ArgName(arg))
+		case "string":
+			T.ExecuteTemplate(buf, "decode-string", ArgName(arg))
+		case "array":
+			T.ExecuteTemplate(buf, "decode-array", ArgName(arg))
+		case "fd":
+			T.ExecuteTemplate(buf, "decode-fd", ArgName(arg))
+		default:
+			return ""
+		}
+	}
+	return buf.String()
+}
 
 func ArgEncode(args []*Arg) string {
 	buf := &bytes.Buffer{}
 	for _, arg := range args {
 		switch arg.Type {
 		case "int", "uint", "object":
-			buf.WriteString(
-				fmt.Sprintf(
-					"\tbinary.Write(this.c.buf, hostByteOrder, %s)\n",
-					ArgName(arg),
-				),
-			)
+			T.ExecuteTemplate(buf, "encode-base", ArgName(arg))
 		case "new_id":
+			// Special case handling for "bind"
 			if arg.Interface == "" {
-				buf.WriteString(
-					fmt.Sprintf(
-						"\tbinary.Write(this.c.buf, hostByteOrder, %s)\n",
-						ArgName(arg),
-					),
-				)
+				T.ExecuteTemplate(buf, "encode-bind", ArgName(arg))
 			} else {
-				buf.WriteString(
-					fmt.Sprintf(
-						"\tret := this.c.New%s()\n",
-						InterfaceName(arg.Interface),
-					),
-				)
-				buf.WriteString("\tbinary.Write(this.c.buf, hostByteOrder, ret.ID())\n")
-
+				T.ExecuteTemplate(buf, "encode-new-id", InterfaceName(arg.Interface))
 			}
 		case "fixed":
-			buf.WriteString(
-				fmt.Sprintf(
-					"\ttmp = float64ToFixed(%s)\n",
-					ArgName(arg),
-				),
-			)
-			buf.WriteString("\tbinary.Write(this.c.buf, hostByteOder, tmp)\n")
+			T.ExecuteTemplate(buf, "encode-fixed", ArgName(arg))
 		case "string":
-			buf.WriteString(
-				fmt.Sprintf(
-					"\tbinary.Write(this.c.buf, hostByteOrder, len(%s))\n",
-					ArgName(arg),
-				),
-			)
-			buf.WriteString(
-				fmt.Sprintf(
-					"\tthis.c.buf.WriteString(%s)\n",
-					ArgName(arg),
-				),
-			)
+			T.ExecuteTemplate(buf, "encode-string", ArgName(arg))
 		case "array":
-			buf.WriteString(
-				fmt.Sprintf(
-					"\tbinary.Write(this.c.buf, hostByteOrder, len(%s))\n",
-					ArgName(arg),
-				),
-			)
-			buf.WriteString(
-				fmt.Sprintf(
-					"\tthis.c.buf.Write(%s)\n",
-					ArgName(arg),
-				),
-			)
+			T.ExecuteTemplate(buf, "encode-array", ArgName(arg))
 		case "fd":
-			buf.WriteString(fmt.Sprintf("\t// TODO: handle fds\n"))
+			T.ExecuteTemplate(buf, "encode-fd", ArgName(arg))
 		default:
 			return ""
 		}
-
 	}
 	return buf.String()
 }
